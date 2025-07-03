@@ -57,7 +57,7 @@ jobs:
         sed -i 's/android.arch = .*/android.archs = arm64-v8a/' buildozer.spec || echo "android.archs = arm64-v8a" >> buildozer.spec
         sed -i 's/android.api = .*/android.api = 30/' buildozer.spec || echo "android.api = 30" >> buildozer.spec
         sed -i 's/android.minapi = .*/android.minapi = 21/' buildozer.spec || echo "android.minapi = 21" >> buildozer.spec
-        sed -i 's/android.ndk = .*/android.ndk = 23b/' buildozer.spec || echo "android.ndk = 23b" >> buildozer.spec
+        sed -i 's/android.ndk = .*/android.ndk = 25b/' buildozer.spec || echo "android.ndk = 25b" >> buildozer.spec
         sed -i 's/requirements = .*/requirements = python3,kivy/' buildozer.spec || echo "requirements = python3,kivy" >> buildozer.spec
         # Remove deprecated android.sdk line
         sed -i '/android.sdk = /d' buildozer.spec
