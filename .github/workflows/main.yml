@@ -21,18 +21,25 @@ jobs:
       with:
         python-version: '3.9'
 
+    - name: Set up JDK 11
+      uses: actions/setup-java@v4
+      with:
+        java-version: '11'
+        distribution: 'temurin'
+
     - name: Install system dependencies
       run: |
         sudo apt update
-        sudo apt install -y git zip unzip openjdk-11-jdk python3-pip autoconf libtool pkg-config zlib1g-dev libncurses5-dev libncursesw5-dev cmake libffi-dev libssl-dev python3-setuptools python3-dev
+        sudo apt install -y git zip unzip python3-pip autoconf libtool pkg-config zlib1g-dev libncurses5-dev libncursesw5-dev cmake libffi-dev libssl-dev python3-setuptools python3-dev
 
     - name: Install Python dependencies
       run: |
         python -m pip install --upgrade pip
         pip install cython==0.29.33
         pip install buildozer
-        # Verify Cython installation
+        # Verify installations
         cython --version
+        buildozer --version
 
     - name: Create main.py if missing
       run: |
@@ -61,9 +68,21 @@ jobs:
         sed -i 's/requirements = .*/requirements = python3,kivy/' buildozer.spec || echo "requirements = python3,kivy" >> buildozer.spec
         # Remove deprecated android.sdk line
         sed -i '/android.sdk = /d' buildozer.spec
+        # Add Gradle settings for better compatibility
+        echo "android.gradle_dependencies = " >> buildozer.spec
+        echo "android.add_compile_options = " >> buildozer.spec
+        echo "android.accept_sdk_license = True" >> buildozer.spec
+
+    - name: Clean previous builds
+      run: |
+        rm -rf .buildozer/android/platform/build-*
+        rm -rf .buildozer/android/app
 
     - name: Build APK with Buildozer
       run: |
+        # Set environment variables for better Gradle compatibility
+        export GRADLE_OPTS="-Dorg.gradle.daemon=false -Dorg.gradle.jvmargs=-Xmx2048m"
+        export JAVA_OPTS="-Xmx2048m"
         buildozer android debug --verbose
       env:
         ANDROID_NDK_ROOT: ""
@@ -82,5 +101,5 @@ jobs:
       uses: actions/upload-artifact@v4
       with:
         name: buildozer-log
-        path: .buildozer/android/platform/build-**/build.log
+        path: .buildozer/android/platform/build-*/build.log
         retention-days: 7
