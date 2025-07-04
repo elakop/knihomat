@@ -37,9 +37,7 @@ jobs:
         python -m pip install --upgrade pip
         pip install cython==0.29.33
         pip install buildozer
-        # Verify installations
-        cython --version
-        buildozer --version
+        pip install sh
 
     - name: Create main.py if missing
       run: |
@@ -55,38 +53,77 @@ jobs:
         EOF
         fi
 
-    - name: Setup buildozer.spec
+    - name: Setup minimal buildozer.spec
       run: |
-        if [ ! -f buildozer.spec ]; then
-          buildozer init
-        fi
-        # Update to modern buildozer.spec format
-        sed -i 's/android.arch = .*/android.archs = arm64-v8a/' buildozer.spec || echo "android.archs = arm64-v8a" >> buildozer.spec
-        sed -i 's/android.api = .*/android.api = 30/' buildozer.spec || echo "android.api = 30" >> buildozer.spec
-        sed -i 's/android.minapi = .*/android.minapi = 21/' buildozer.spec || echo "android.minapi = 21" >> buildozer.spec
-        sed -i 's/android.ndk = .*/android.ndk = 25b/' buildozer.spec || echo "android.ndk = 25b" >> buildozer.spec
-        sed -i 's/requirements = .*/requirements = python3,kivy/' buildozer.spec || echo "requirements = python3,kivy" >> buildozer.spec
-        # Remove deprecated android.sdk line
-        sed -i '/android.sdk = /d' buildozer.spec
-        # Add Gradle settings for better compatibility
-        echo "android.gradle_dependencies = " >> buildozer.spec
-        echo "android.add_compile_options = " >> buildozer.spec
-        echo "android.accept_sdk_license = True" >> buildozer.spec
+        cat > buildozer.spec << 'EOF'
+        [app]
+        title = Knihomat
+        package.name = knihomat
+        package.domain = org.example
+        source.dir = .
+        source.include_exts = py,png,jpg,kv,atlas
+        version = 0.1
+        requirements = python3,kivy
+        orientation = portrait
+        fullscreen = 0
 
-    - name: Clean previous builds
-      run: |
-        rm -rf .buildozer/android/platform/build-*
-        rm -rf .buildozer/android/app
+        [buildozer]
+        log_level = 2
 
-    - name: Build APK with Buildozer
+        [android]
+        android.archs = arm64-v8a
+        android.permissions = WRITE_EXTERNAL_STORAGE
+        android.api = 28
+        android.minapi = 21
+        android.ndk = 25b
+        android.private_storage = True
+        android.accept_sdk_license = True
+        EOF
+
+    - name: Completely clean buildozer cache
       run: |
-        # Set environment variables for better Gradle compatibility
-        export GRADLE_OPTS="-Dorg.gradle.daemon=false -Dorg.gradle.jvmargs=-Xmx2048m"
-        export JAVA_OPTS="-Xmx2048m"
+        rm -rf ~/.buildozer
+        rm -rf .buildozer
+
+    - name: Build APK with Buildozer (first attempt)
+      id: build_attempt_1
+      continue-on-error: true
+      run: |
+        export GRADLE_OPTS="-Dorg.gradle.daemon=false -Dorg.gradle.jvmargs=-Xmx1024m -Dorg.gradle.configureondemand=false"
+        export JAVA_OPTS="-Xmx1024m"
         buildozer android debug --verbose
       env:
         ANDROID_NDK_ROOT: ""
         ANDROID_SDK_ROOT: ""
+
+    - name: Fix Gradle permissions and retry
+      if: steps.build_attempt_1.outcome == 'failure'
+      run: |
+        # Find and fix gradlew permissions
+        find .buildozer -name "gradlew" -exec chmod +x {} \; 2>/dev/null || true
+        find ~/.buildozer -name "gradlew" -exec chmod +x {} \; 2>/dev/null || true
+        
+        # Manual Gradle setup if needed
+        if [ -d ".buildozer/android/platform/build-arm64-v8a/dists/knihomat" ]; then
+          cd .buildozer/android/platform/build-arm64-v8a/dists/knihomat
+          if [ -f "gradlew" ]; then
+            chmod +x gradlew
+            ./gradlew clean assembleDebug --no-daemon --parallel || true
+          fi
+          cd ../../../../..
+        fi
+        
+        # Try buildozer again
+        export GRADLE_OPTS="-Dorg.gradle.daemon=false -Dorg.gradle.jvmargs=-Xmx1024m"
+        buildozer android debug --verbose
+
+    - name: List generated files
+      if: always()
+      run: |
+        echo "Contents of bin directory:"
+        ls -la bin/ 2>/dev/null || echo "bin directory not found"
+        echo "Looking for APK files:"
+        find . -name "*.apk" -type f 2>/dev/null || echo "No APK files found"
 
     - name: Upload APK artifact
       if: success()
@@ -96,10 +133,22 @@ jobs:
         path: bin/*.apk
         retention-days: 30
 
+    - name: Upload any APK found
+      if: failure()
+      uses: actions/upload-artifact@v4
+      with:
+        name: partial-build-apk
+        path: |
+          **/*.apk
+          .buildozer/android/platform/build-*/dists/*/build/outputs/apk/debug/*.apk
+        retention-days: 7
+
     - name: Upload buildozer log on failure
       if: failure()
       uses: actions/upload-artifact@v4
       with:
-        name: buildozer-log
-        path: .buildozer/android/platform/build-*/build.log
+        name: buildozer-debug-log
+        path: |
+          .buildozer/android/platform/build-*/build.log
+          .buildozer/android/platform/build-*/dists/*/gradlew.log
         retention-days: 7
